@@ -14,7 +14,13 @@ USO
 2. Lista Excel: scegli il file. La colonna degli indirizzi viene trovata da sola
    (oppure scrivi la lettera, es. B, o l'intestazione, es. Email).
    Duplicati e indirizzi malformati vengono scartati e mostrati.
-3. Messaggio: oggetto e testo semplice.
+3. Messaggio: oggetto, poi testo semplice oppure un documento Word (.docx) formattato.
+   Dal .docx vengono mantenuti grassetto, corsivo, sottolineato, colori, evidenziato,
+   dimensioni e caratteri, allineamenti, titoli, elenchi, tabelle, link e immagini.
+   Logo facoltativo in alto a destra: PNG, JPG, GIF, BMP, WEBP, TIFF, ICO
+   (adattato a max 180x60 px; per l'SVG esportalo prima in PNG).
+   "Anteprima nel browser" mostra la mail come arriverà.
+   La mail parte in HTML con immagini incorporate + versione testo semplice.
 4. Programmazione: blocchi da 250, una email ogni 6 secondi, un blocco ogni 35 minuti
    (impostazioni consigliate). Avvio subito o a data/ora, fascia oraria facoltativa.
    Premi "Avvia / Riprendi invio" e lascia il programma aperto.

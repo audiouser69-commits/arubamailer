@@ -34,7 +34,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("ArubaMailer - invio a blocchi da casella Aruba")
-        self.geometry("900x680")
+        self.geometry("940x760")
         self.minsize(820, 600)
         self.q = queue.Queue()
         self.job = None
@@ -86,7 +86,8 @@ class App(tk.Tk):
                  batch=self.v_batch.get(), interval=self.v_interval.get(), period=self.v_period.get(),
                  cap=self.v_cap.get(), win_on=self.v_win_on.get(), win_from=self.v_win_from.get(),
                  win_to=self.v_win_to.get(), column=self.v_col.get(),
-                 subject=self.v_subject.get(), body=self.txt_body.get("1.0", "end-1c"))
+                 subject=self.v_subject.get(), body=self.plain_text(),
+                 mode=self.v_mode.get(), docx=self.v_docx.get(), logo=self.v_logo.get())
         c["pw"] = me.protect_password(self.v_pass.get()) if self.v_remember.get() else ""
         save_config(c)
 
@@ -146,13 +147,17 @@ class App(tk.Tk):
 
     def test_mail(self):
         a = self.account()
-        subj = self.v_subject.get() or "Prova ArubaMailer"
-        body = self.txt_body.get("1.0", "end-1c") or "Messaggio di prova."
+        try:
+            content = self.make_content()
+        except Exception as e:
+            messagebox.showerror(APP, "Messaggio non valido: %s" % e)
+            return
+        content.subject = "[PROVA] " + (content.subject or "ArubaMailer")
 
         def fn():
             s = a.connect_smtp(timeout=30)
             try:
-                st, resp = me.send_one(s, a, a.sender_email, "[PROVA] " + subj, body)
+                st, resp = me.send_one(s, a, a.sender_email, content)
                 if st != "sent":
                     raise RuntimeError(resp)
             finally:
@@ -228,9 +233,7 @@ class App(tk.Tk):
             txt += "\nCampagna esistente ripresa (%d nuovi indirizzi aggiunti)." % added
             s = self.campaign.get_meta("subject")
             if s and not self.v_subject.get():
-                self.v_subject.set(s)
-                self.txt_body.delete("1.0", "end")
-                self.txt_body.insert("1.0", self.campaign.get_meta("body", ""))
+                self.restore_message_from_campaign()
         self.lbl_stats.config(text=txt)
         self.refresh_counts()
         self.update_estimate()
@@ -247,9 +250,7 @@ class App(tk.Tk):
         self.lbl_stats.config(text="Campagna aperta.")
         s = self.campaign.get_meta("subject")
         if s:
-            self.v_subject.set(s)
-            self.txt_body.delete("1.0", "end")
-            self.txt_body.insert("1.0", self.campaign.get_meta("body", ""))
+            self.restore_message_from_campaign()
         self.refresh_counts()
         self.update_estimate()
 
@@ -277,21 +278,152 @@ class App(tk.Tk):
     # ------------------------------------------------------------ tab 3
     def build_msg(self):
         f = self.tab_msg
-        self.v_subject = tk.StringVar(value=self.cfg.get("subject", ""))
+        c = self.cfg
+        self.v_subject = tk.StringVar(value=c.get("subject", ""))
+        self.v_mode = tk.StringVar(value=c.get("mode", "text"))
+        self.v_docx = tk.StringVar(value=c.get("docx", ""))
+        self.v_logo = tk.StringVar(value=c.get("logo", ""))
+        self._plain_saved = c.get("body", "")
+
         ttk.Label(f, text="Oggetto").pack(anchor="w")
-        ttk.Entry(f, textvariable=self.v_subject).pack(fill="x", pady=(0, 10))
-        ttk.Label(f, text="Testo (solo testo semplice)").pack(anchor="w")
+        ttk.Entry(f, textvariable=self.v_subject).pack(fill="x", pady=(0, 8))
+
+        src = ttk.LabelFrame(f, text="Contenuto", padding=8)
+        src.pack(fill="x")
+        ttk.Radiobutton(src, text="Testo semplice (scritto qui sotto)", value="text", variable=self.v_mode,
+                        command=self.on_mode).grid(row=0, column=0, sticky="w")
+        ttk.Radiobutton(src, text="Documento Word formattato (.docx):", value="docx", variable=self.v_mode,
+                        command=self.on_mode).grid(row=1, column=0, sticky="w")
+        ttk.Entry(src, textvariable=self.v_docx, width=58).grid(row=1, column=1, sticky="w", padx=4)
+        ttk.Button(src, text="Scegli .docx...", command=self.pick_docx).grid(row=1, column=2)
+        ttk.Button(src, text="Ricarica", command=self.on_mode).grid(row=1, column=3, padx=4)
+
+        lg = ttk.LabelFrame(f, text="Logo in alto a destra (facoltativo)", padding=8)
+        lg.pack(fill="x", pady=6)
+        ttk.Entry(lg, textvariable=self.v_logo, width=58).grid(row=0, column=0, sticky="w")
+        ttk.Button(lg, text="Scegli immagine...", command=self.pick_logo).grid(row=0, column=1, padx=4)
+        ttk.Button(lg, text="Rimuovi", command=lambda: (self.v_logo.set(""), self.update_logo_info())).grid(row=0, column=2)
+        self.lbl_logo = ttk.Label(lg, text="", foreground="#666")
+        self.lbl_logo.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+        self.lbl_body = ttk.Label(f, text="Testo")
+        self.lbl_body.pack(anchor="w")
         fr = ttk.Frame(f)
         fr.pack(fill="both", expand=True)
-        self.txt_body = tk.Text(fr, wrap="word", font=("Segoe UI", 10), undo=True)
+        self.txt_body = tk.Text(fr, wrap="word", font=("Segoe UI", 10), undo=True, height=8)
         sb = ttk.Scrollbar(fr, command=self.txt_body.yview)
         self.txt_body.config(yscrollcommand=sb.set)
         self.txt_body.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        self.txt_body.insert("1.0", self.cfg.get("body", ""))
-        ttk.Label(f, text=("Ogni destinatario riceve la mail con il proprio indirizzo nel campo A: "
-                           "nessuno vede gli altri indirizzi. Usa 'Invia una mail di prova' nella scheda 1 "
-                           "per vedere come arriva."), foreground="#335", wraplength=840).pack(anchor="w", pady=6)
+        bot = ttk.Frame(f)
+        bot.pack(fill="x", pady=6)
+        ttk.Button(bot, text="Anteprima nel browser", command=self.preview).pack(side="left")
+        self.lbl_size = ttk.Label(bot, text="", foreground="#335")
+        self.lbl_size.pack(side="left", padx=10)
+        ttk.Label(f, text=("Ogni destinatario riceve la mail con il proprio indirizzo nel campo A. Con Word o logo "
+                           "la mail parte in HTML con le immagini incorporate, più una versione in testo semplice "
+                           "per i programmi che non mostrano l'HTML."),
+                  foreground="#335", wraplength=840, justify="left").pack(anchor="w")
+        if self.v_mode.get() == "text":
+            self.txt_body.insert("1.0", self._plain_saved)
+        self.on_mode()
+        self.update_logo_info()
+
+    def plain_text(self):
+        if self.v_mode.get() == "text":
+            return self.txt_body.get("1.0", "end-1c")
+        return self._plain_saved
+
+    def on_mode(self):
+        if self.v_mode.get() == "text":
+            if str(self.txt_body["state"]) == "disabled":
+                self.txt_body.config(state="normal", bg="white")
+                self.txt_body.delete("1.0", "end")
+                self.txt_body.insert("1.0", self._plain_saved)
+            self.lbl_body.config(text="Testo")
+        else:
+            if str(self.txt_body["state"]) == "normal" and self.txt_body.get("1.0", "end-1c").strip():
+                self._plain_saved = self.txt_body.get("1.0", "end-1c")
+            self.txt_body.config(state="normal")
+            self.txt_body.delete("1.0", "end")
+            p = self.v_docx.get()
+            if p:
+                try:
+                    c = me.build_content(self.v_subject.get(), docx_path=p)
+                    self.txt_body.insert("1.0", c.text)
+                    self.lbl_size.config(text="Documento caricato: %d immagini interne, circa %d KB per mail"
+                                         % (len(c.images), c.size_estimate() // 1024))
+                except Exception as e:
+                    self.txt_body.insert("1.0", "Errore lettura del documento: %s" % e)
+            else:
+                self.txt_body.insert("1.0", "Scegli un file .docx")
+            self.txt_body.config(state="disabled", bg="#f3f3f3")
+            self.lbl_body.config(text="Versione in testo semplice generata dal documento (sola lettura)")
+
+    def pick_docx(self):
+        p = filedialog.askopenfilename(title="Documento Word", filetypes=[("Word", "*.docx"), ("Tutti", "*.*")])
+        if p:
+            if p.lower().endswith(".doc"):
+                messagebox.showinfo(APP, "Formato .doc vecchio: aprilo in Word e salvalo come .docx")
+                return
+            self.v_docx.set(p)
+            self.v_mode.set("docx")
+            self.on_mode()
+
+    def pick_logo(self):
+        p = filedialog.askopenfilename(title="Logo", filetypes=[
+            ("Immagini", "*.png *.jpg *.jpeg *.gif *.bmp *.webp *.tif *.tiff *.ico"), ("Tutti", "*.*")])
+        if p:
+            self.v_logo.set(p)
+            self.update_logo_info()
+
+    def update_logo_info(self):
+        p = self.v_logo.get()
+        if not p:
+            self.lbl_logo.config(text="Nessun logo. Formati: PNG, JPG, GIF, BMP, WEBP, TIFF, ICO "
+                                      "(viene adattato a max 180×60 px)")
+            return
+        try:
+            import docx_html
+            data, sub, w, h = docx_html.load_logo(p)
+            self.lbl_logo.config(text="Logo pronto: visualizzato a %d×%d px, %s, %d KB"
+                                 % (w, h, sub.upper(), max(1, len(data) // 1024)), foreground="#0a5")
+        except Exception as e:
+            self.lbl_logo.config(text="Immagine non utilizzabile: %s" % e, foreground="#c00")
+
+    def make_content(self):
+        docx_p = self.v_docx.get() if self.v_mode.get() == "docx" else ""
+        if self.v_mode.get() == "docx" and not docx_p:
+            raise ValueError("scegli il file .docx")
+        return me.build_content(self.v_subject.get(), self.plain_text(), docx_p, self.v_logo.get())
+
+    def preview(self):
+        try:
+            c = self.make_content()
+        except Exception as e:
+            messagebox.showerror(APP, "Messaggio non valido: %s" % e)
+            return
+        import tempfile
+        import webbrowser
+        path = os.path.join(tempfile.gettempdir(), "ArubaMailer_anteprima.html")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(c.preview_html())
+        webbrowser.open("file:///" + path.replace("\\", "/"))
+        self.lbl_size.config(text="Dimensione di ogni mail: circa %d KB" % (c.size_estimate() // 1024))
+
+    def restore_message_from_campaign(self):
+        cp = self.campaign
+        self.v_subject.set(cp.get_meta("subject", ""))
+        self._plain_saved = cp.get_meta("body", "") if cp.get_meta("mode", "text") == "text" else self._plain_saved
+        self.v_docx.set(cp.get_meta("docx", ""))
+        self.v_logo.set(cp.get_meta("logo", ""))
+        self.v_mode.set(cp.get_meta("mode", "text") or "text")
+        if self.v_mode.get() == "text":
+            self.txt_body.config(state="normal", bg="white")
+            self.txt_body.delete("1.0", "end")
+            self.txt_body.insert("1.0", self._plain_saved)
+        self.on_mode()
+        self.update_logo_info()
 
     # ------------------------------------------------------------ tab 4
     def build_send(self):
@@ -425,7 +557,14 @@ class App(tk.Tk):
             return
         try:
             start = self.parse_start()
-            settings = dict(subject=self.v_subject.get(), body=self.txt_body.get("1.0", "end-1c"),
+            content = self.make_content()
+            if content.size_estimate() > 1024 * 1024:
+                if not messagebox.askyesno(APP, "Ogni mail pesa circa %d KB (immagini nel documento). "
+                                                "Con molti destinatari conviene ridurle. Continuare?"
+                                                % (content.size_estimate() // 1024)):
+                    return
+            settings = dict(content=content, subject=self.v_subject.get(), body=self.plain_text(),
+                            mode=self.v_mode.get(), docx=self.v_docx.get(), logo=self.v_logo.get(),
                             batch_size=self.v_batch.get(), interval_s=self.v_interval.get(),
                             period_min=self.v_period.get(), daily_cap=self.v_cap.get(), start_at=start,
                             window_on=self.v_win_on.get(), window_from=self.v_win_from.get(),
@@ -434,7 +573,7 @@ class App(tk.Tk):
                 dt.datetime.strptime(self.v_win_from.get(), "%H:%M")
                 dt.datetime.strptime(self.v_win_to.get(), "%H:%M")
             job = me.SendJob(self.campaign, self.account(), settings, lambda k, d: self.q.put((k, d)))
-        except ValueError as e:
+        except Exception as e:
             messagebox.showerror(APP, "Controlla i dati: %s" % e)
             return
         old = self.campaign.get_meta("subject")

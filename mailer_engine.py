@@ -351,18 +351,74 @@ class Account:
             s.login(self.sender_email, self.password)
         return s
 
-    def build_message(self, to_addr, subject, body):
+    def build_message(self, to_addr, content):
         msg = EmailMessage()
         msg["From"] = email.utils.formataddr((self.sender_name, self.sender_email)) if self.sender_name else self.sender_email
         msg["To"] = to_addr
-        msg["Subject"] = subject
+        msg["Subject"] = content.subject
         msg["Date"] = email.utils.formatdate(localtime=True)
         domain = self.sender_email.split("@")[-1] if "@" in self.sender_email else None
         msg["Message-ID"] = email.utils.make_msgid(domain=domain)
         if self.reply_to:
             msg["Reply-To"] = self.reply_to
-        msg.set_content(body, charset="utf-8")
+        msg.set_content(content.text, charset="utf-8")
+        if content.html:
+            msg.add_alternative(content.html, subtype="html", charset="utf-8")
+            if content.images:
+                html_part = msg.get_payload()[-1]
+                for cid, data, sub in content.images:
+                    html_part.add_related(data, maintype="image", subtype=sub, cid="<%s>" % cid,
+                                          filename="%s.%s" % (cid, "jpg" if sub == "jpeg" else sub),
+                                          disposition="inline")
         return msg
+
+
+class Content:
+    """Contenuto della mail: testo semplice sempre presente, HTML facoltativo (docx e/o logo)."""
+
+    def __init__(self, subject, text, html=None, images=None):
+        self.subject = subject
+        self.text = text
+        self.html = html
+        self.images = images or []      # [(cid, bytes, subtype)]
+
+    def size_estimate(self):
+        return len(self.text.encode()) + len((self.html or "").encode()) + \
+            int(sum(len(b) for _, b, _ in self.images) * 1.37)
+
+    def preview_html(self):
+        """HTML con le immagini incorporate, per l'anteprima nel browser."""
+        import base64
+        h = self.html or ("<pre style='font-family:Consolas,monospace;white-space:pre-wrap'>%s</pre>"
+                          % self.text.replace("&", "&amp;").replace("<", "&lt;"))
+        for cid, data, sub in self.images:
+            h = h.replace("cid:%s" % cid, "data:image/%s;base64,%s" % (sub, base64.b64encode(data).decode()))
+        return h
+
+
+def build_content(subject, text="", docx_path="", logo_path=""):
+    """Crea il Content. Se c'e' un .docx, testo e HTML vengono dal documento."""
+    import docx_html as dh
+    subject = (subject or "").strip()
+    images = []
+    html = None
+    font, size = dh.FONT_STACK, 11
+    if docx_path:
+        if not os.path.exists(docx_path):
+            raise ValueError("File Word non trovato: %s" % docx_path)
+        body_html, text, font, size = dh.DocxConverter(docx_path).convert_with_images(images)
+    else:
+        body_html = dh.text_to_html(text) if logo_path else None
+    if not text.strip() and not images:
+        raise ValueError("Il messaggio è vuoto")
+    logo = None
+    if logo_path:
+        data, sub, w, h = dh.load_logo(logo_path)
+        images.insert(0, ("logo", data, sub))
+        logo = ("logo", w, h)
+    if body_html is not None:
+        html = dh.wrap_html(body_html, font, size, logo)
+    return Content(subject, text, html, images)
 
 
 class BlockedError(Exception):
@@ -384,10 +440,10 @@ def _is_policy(text):
     return any(k in t for k in ("policy", "rate", "too many", "limit", "exceeded", "blocked", "spam"))
 
 
-def send_one(conn, account, addr, subject, body):
+def send_one(conn, account, addr, content):
     """Invia a un destinatario. Ritorna (status, risposta).
     Solleva BlockedError / FatalError / errori di connessione."""
-    msg = account.build_message(addr, subject, body)
+    msg = account.build_message(addr, content)
     try:
         refused = conn.send_message(msg, from_addr=account.sender_email, to_addrs=[addr])
     except smtplib.SMTPRecipientsRefused as e:
@@ -416,7 +472,7 @@ def send_one(conn, account, addr, subject, body):
 class SendJob(threading.Thread):
     """
     settings: dict con
-      subject, body, batch_size, interval_s, period_min, daily_cap,
+      content (Content), subject, body, docx, logo (per memoria), batch_size, interval_s, period_min, daily_cap,
       start_at (datetime|None), window_on, window_from (HH:MM), window_to (HH:MM)
     callback(kind, data): 'log' str, 'progress' dict counts, 'status' str, 'next' datetime|None, 'done' str
     """
@@ -437,10 +493,8 @@ class SendJob(threading.Thread):
         s["interval_s"] = max(MIN_INTERVAL_S, float(s["interval_s"]))
         s["period_min"] = max(min_batch_period_min(s["batch_size"], s["interval_s"]), float(s["period_min"]))
         s["daily_cap"] = max(1, min(HARD_DAILY_CAP, int(s.get("daily_cap", DEFAULT_DAILY_CAP))))
-        if not s.get("subject", "").strip():
+        if not s["content"].subject:
             raise ValueError("Oggetto vuoto")
-        if not s.get("body", "").strip():
-            raise ValueError("Testo vuoto")
 
     def stop(self):
         self.stop_event.set()
@@ -484,8 +538,9 @@ class SendJob(threading.Thread):
         keep_awake(True)
         result = "Completato"
         try:
-            self.c.set_meta("subject", self.s["subject"])
-            self.c.set_meta("body", self.s["body"])
+            for k in ("subject", "body", "docx", "logo", "mode"):
+                if k in self.s:
+                    self.c.set_meta(k, self.s[k] or "")
             if not self.c.get_meta("started_at"):
                 self.c.set_meta("started_at", now_str())
             s = self.s
@@ -582,7 +637,7 @@ class SendJob(threading.Thread):
                         self.stop_event.wait(120)
                         continue
                 try:
-                    status, resp = send_one(conn, self.a, addr, self.s["subject"], self.s["body"])
+                    status, resp = send_one(conn, self.a, addr, self.s["content"])
                 except (smtplib.SMTPServerDisconnected, OSError, socket.timeout) as e:
                     # connessione caduta: l'indirizzo NON e' segnato, si riprova dopo riconnessione
                     self.log("Connessione persa durante l'invio a %s (%s): riconnetto." % (addr, e))

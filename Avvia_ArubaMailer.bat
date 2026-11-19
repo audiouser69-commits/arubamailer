@@ -11,9 +11,9 @@ if not defined PY (
   pause
   exit /b 1
 )
-%PY% -c "import openpyxl" 2>nul || (
+%PY% -c "import openpyxl, docx, PIL" 2>nul || (
   echo Installo il componente per leggere Excel ^(solo la prima volta^)...
-  %PY% -m pip install --user openpyxl
+  %PY% -m pip install --user openpyxl python-docx pillow
 )
 %PY% ArubaMailer.pyw
 if errorlevel 1 pause
