@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -21,3 +23,13 @@ jobs:
         with:
           name: ArubaMailer-exe
           path: dist/ArubaMailer.exe
+      - name: Publish exe on branch "exe"
+        shell: bash
+        run: |
+          mkdir out && cp dist/ArubaMailer.exe LEGGIMI.txt out/
+          cd out
+          git init -q -b exe
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A && git commit -qm "ArubaMailer.exe build ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" exe
