@@ -1,0 +1,50 @@
+ARUBAMAILER - invio programmato a blocchi da casella Aruba
+==========================================================
+
+AVVIO
+1. Estrai la cartella dove vuoi (es. Documenti\ArubaMailer).
+2. Doppio clic su  Avvia_ArubaMailer.bat
+   (serve Python 3 per Windows: se manca, si apre la pagina di download.
+    Durante l'installazione spunta "Add python.exe to PATH").
+   Facoltativo: Crea_EXE.bat crea un unico ArubaMailer.exe che non richiede più Python.
+
+USO
+1. Account Aruba: email, password -> "Prova connessione" -> "Invia una mail di prova a me stesso".
+   Server già impostati: smtps.aruba.it porta 465 (SSL), imaps.aruba.it porta 993.
+2. Lista Excel: scegli il file. La colonna degli indirizzi viene trovata da sola
+   (oppure scrivi la lettera, es. B, o l'intestazione, es. Email).
+   Duplicati e indirizzi malformati vengono scartati e mostrati.
+3. Messaggio: oggetto, poi testo semplice oppure un documento Word (.docx) formattato.
+   Dal .docx vengono mantenuti grassetto, corsivo, sottolineato, colori, evidenziato,
+   dimensioni e caratteri, allineamenti, titoli, elenchi, tabelle, link e immagini.
+   Logo facoltativo in alto a destra: PNG, JPG, GIF, BMP, WEBP, TIFF, ICO
+   (adattato a max 180x60 px; per l'SVG esportalo prima in PNG).
+   "Anteprima nel browser" mostra la mail come arriverà.
+   La mail parte in HTML con immagini incorporate + versione testo semplice.
+4. Programmazione: blocchi da 250, una email ogni 6 secondi, un blocco ogni 35 minuti
+   (impostazioni consigliate). Avvio subito o a data/ora, fascia oraria facoltativa.
+   Premi "Avvia / Riprendi invio" e lascia il programma aperto.
+
+LIMITI ARUBA APPLICATI (non superabili dal programma)
+- una email per destinatario (Aruba: max 150 destinatari per singolo invio)
+- max 250 email ogni 20 minuti (indicazione dell'assistenza Aruba)
+- max 8000 destinatari ogni 24 ore (policy di utilizzo Aruba)
+- se Aruba risponde "policy violation" o simili: pausa di 60 minuti;
+  alla seconda volta il programma si ferma.
+
+CERTEZZA DI INVIO
+- Ogni indirizzo ha un esito salvato nel file  <nome excel>_campagna.db  accanto all'Excel.
+- Se il PC si spegne o chiudi il programma, riapri lo stesso Excel e premi Avvia:
+  riparte dagli indirizzi non ancora inviati, senza doppioni.
+- Errori temporanei (4xx) vengono ritentati fino a 3 volte nei blocchi successivi.
+- Dopo qualche ora dall'invio premi "Controlla rimbalzi": legge la Posta in arrivo
+  e segna gli indirizzi tornati indietro (inesistenti, caselle piene...).
+- "Esporta esiti in Excel" crea il riepilogo completo.
+- "Inviata" significa accettata dal server Aruba: la consegna finale dipende dal
+  server del destinatario; i casi di mancata consegna emergono con i rimbalzi.
+
+NOTE
+- Le email inviate dal programma non compaiono nella cartella "Posta inviata" della webmail:
+  fa fede l'export degli esiti.
+- Durante la campagna il PC non va in sospensione automatica (ma non spegnerlo).
+- La password, se scegli "Ricorda", è cifrata con il tuo utente Windows (DPAPI).
